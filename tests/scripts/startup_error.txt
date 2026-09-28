@@ -1,4 +1,5 @@
 ls
 cd /
+vfs-init
 foobar
 ls
