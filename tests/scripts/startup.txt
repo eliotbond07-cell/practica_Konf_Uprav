@@ -1,14 +1,21 @@
 uname
 uptime
 ls
-cd
-cd /
+mkdir new_dir
 ls
-cd home
+cd new_dir
 ls
 cd ..
+mkdir newdir
+mv newdir renamed
 ls
-cd "путь с пробелами"
-vfs-init
+cd renamed
+cd ..
+mkdir "папка с пробелами"
 ls
-uptime
+mv "папка с пробелами" spaces
+ls
+mv renamed newdir
+help
+#vfs-init
+ls
