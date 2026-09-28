@@ -1,5 +1,5 @@
 ls
-cd /
+cd /food
 vfs-init
 foobar
 ls

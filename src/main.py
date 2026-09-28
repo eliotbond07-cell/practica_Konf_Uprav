@@ -2,9 +2,10 @@ import argparse
 import copy
 import json
 import os
+import time
+import shlex
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
-import shlex
 
 VFS_NAME = "MyVFS"
 DEFAULT_VFS = {"type": "dir", "name": "/", "children": []}
@@ -16,6 +17,8 @@ entry = None
 vfs = None
 vfs_path = None
 vfs_original = None
+cwd = []
+start_time = None
 
 def init_gui(vfs_path_arg, script_path):
     """Создаёт окно, загружает VFS, запускает скрипт и главный цикл.
@@ -27,9 +30,11 @@ def init_gui(vfs_path_arg, script_path):
     Returns:
         None
     """
-    global root, out, entry, vfs, vfs_path, vfs_original
+    global root, out, entry, vfs, vfs_path, vfs_original, cwd, start_time
 
     vfs_path = vfs_path_arg
+    cwd = []
+    start_time = time.time()
 
     root = tk.Tk()
     title = os.path.basename(vfs_path) if vfs_path else "default"
@@ -55,13 +60,13 @@ def init_gui(vfs_path_arg, script_path):
 
     vfs = load_vfs(vfs_path)
     vfs_original = copy.deepcopy(vfs)
-    print_line(f"VFS загружена: {vfs_path or 'default'}\n")
+    print_line(f"VFS загружена: {vfs_path or 'default'}")
+    print_line(f"Корень содержит узлов: {len(vfs.get('children', []))}\n")
 
     if script_path:
         run_script(script_path)
     else:
-        print_line(f"{VFS_NAME}: эмулятор оболочки. Введите команду.")
-        print_line()
+        print_line(f"{VFS_NAME}: эмулятор оболочки. Введите команду.\n")
 
     root.mainloop()
 
@@ -114,9 +119,13 @@ def run_command(cmd, args):
         bool: True при успехе, False при неизвестной команде.
     """
     if cmd == "ls":
-        return cmd_ls(args)
+        return cmd_ls()
     if cmd == "cd":
         return cmd_cd(args)
+    if cmd == "uptime":
+        return cmd_uptime()
+    if cmd == "uname":
+        return cmd_uname()
     if cmd == "vfs-init":
         return cmd_vfs_init()
     if cmd == "exit":
@@ -125,19 +134,82 @@ def run_command(cmd, args):
     print_line(f"{cmd}: команда не найдена")
     return False
 
-def cmd_ls(args):
-    """Выполняет команду ls."""
-    print_line(f"ls: аргументы = {args}")
+def cmd_ls():
+    """Показывает содержимое текущей папки.
+
+    Returns:
+        bool: True при успехе.
+    """
+    node = get_node(cwd)
+    if node is None or node.get("type") != "dir":
+        print_line("ls: текущая папка недоступна")
+        return False
+
+    children = node.get("children", [])
+    if not children:
+        print_line("(пусто)")
+        return True
+
+    for child in children:
+        prefix = "d " if child["type"] == "dir" else "- "
+        print_line(prefix + child["name"])
     return True
 
 def cmd_cd(args):
-    """Выполняет команду cd."""
-    print_line(f"cd: аргументы = {args}")
+    """Переходит в другую папку.
+
+    Поддерживает: без аргументов (в корень), '/', '..', имя папки.
+
+    Args:
+        args (list[str]): Аргументы: 0 или 1 путь.
+
+    Returns:
+        bool: True при успехе.
+    """
+    global cwd
+
+    if len(args) > 1:
+        print_line("cd: слишком много аргументов")
+        return False
+
+    if not args or args[0] == "/":
+        cwd = []
+        return True
+
+    target = args[0]
+    if target == "..":
+        if cwd:
+            cwd = cwd[:-1]
+        return True
+
+    node = get_node(cwd)
+    if node is None:
+        print_line("cd: текущая папка недоступна")
+        return False
+
+    for child in node.get("children", []):
+        if child["name"] == target and child["type"] == "dir":
+            cwd = cwd + [target]
+            return True
+
+    print_line(f"cd: нет такой папки: {target}")
+    return False
+
+def cmd_uptime():
+    """Показывает время работы эмулятора."""
+    if start_time is None:
+        print_line("uptime: эмулятор ещё не запущен")
+        return False
+
+    seconds = int(time.time() - start_time)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    print_line(f"up {hours:02d}:{minutes:02d}:{secs:02d}")
     return True
 
-def cmd_exit():
-    """Выполняет команду exit."""
-    root.destroy()
+def cmd_uname():
+    """Показывает информацию о системе."""
+    print_line(f"{VFS_NAME} emulator 1.0 (Python VFS)")
     return True
 
 def cmd_vfs_init():
@@ -149,10 +221,11 @@ def cmd_vfs_init():
     Returns:
         bool: True при успехе.
     """
-    global vfs, vfs_original
+    global vfs, vfs_original, cwd
 
     vfs = copy.deepcopy(DEFAULT_VFS)
     vfs_original = copy.deepcopy(DEFAULT_VFS)
+    cwd = []
 
     if vfs_path:
         try:
@@ -165,6 +238,11 @@ def cmd_vfs_init():
     else:
         print_line("vfs-init: VFS сброшена к default")
 
+    return True
+
+def cmd_exit():
+    """Выполняет команду exit."""
+    root.destroy()
     return True
 
 def execute(line):
@@ -296,6 +374,29 @@ def load_vfs(path):
     except (OSError, json.JSONDecodeError) as e:
         print_line(f"Ошибка загрузки VFS: {e}")
         return copy.deepcopy(DEFAULT_VFS)
+
+def get_node(path_parts):
+    """Возвращает узел VFS по списку имён от корня.
+
+    Args:
+        path_parts (list[str]): Путь по именам ([] - корень).
+
+    Returns:
+        dict | None: Узел или None, если не найден.
+    """
+    node = vfs
+    for name in path_parts:
+        if node.get("type") != "dir":
+            return None
+        found = None
+        for child in node.get("children", []):
+            if child["name"] == name:
+                found = child
+                break
+        if found is None:
+            return None
+        node = found
+    return node
 
 args = parse_args()
 init_gui(args.vfs, args.script)

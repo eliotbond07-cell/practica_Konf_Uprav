@@ -1,14 +1,18 @@
 uname
 uptime
 ls
-cd
+cd usr
+ls
+cd local
+ls
+cd share
+ls
 cd /
 ls
 cd home
 ls
 cd ..
 ls
-cd "путь с пробелами"
 vfs-init
 ls
 uptime
